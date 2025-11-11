@@ -1,9 +1,17 @@
-streamlit==1.23.1
-pandas==1.1.5
-scikit-learn==1.0.2
+# Core ML/Data
+tensorflow>=2.9.0,<2.12
+keras>=2.9.0
+numpy>=1.19.5,<1.24
+scikit-learn>=1.0.0,<2.0
+pandas>=1.1.0,<2.0
+
+# Web Framework
+streamlit>=1.20.0
+
+# Utilities
 joblib>=1.0.0
-tensorflow==2.9.0
-numpy<1.24
-urllib3<2
-protobuf==3.20.0
+urllib3<2.0
+
+# These are auto-installed by tf/streamlit but pinned for stability
+protobuf>=3.19.0,<4.0
 setuptools>=41.0.0

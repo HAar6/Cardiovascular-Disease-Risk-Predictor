@@ -32,12 +32,14 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 warnings.filterwarnings('ignore')
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), 'binary_model.h5')
+ONNX_PATH = os.path.join(os.path.dirname(__file__), 'binary_model.onnx')
 
 # Feature names in order (must match training data)
 FEATURE_NAMES = ['age', 'sex', 'cp', 'trestbps', 'chol', 'fbs', 'restecg', 'thalach', 'exang', 'oldpeak', 'slope', 'ca', 'thal']
 
 _model = None
 _model_trained = False
+_onnx_session = None
 
 
 def load_or_train_model():
@@ -47,17 +49,17 @@ def load_or_train_model():
     if _model_trained:
         return _model
     
-    # Try to load existing model
+    # Try to load existing TF model (only if present)
     if os.path.exists(MODEL_PATH):
         try:
-            # Import Keras AFTER OrderedDict fix
+            # Import Keras lazily (only when TF is available locally)
             from tensorflow.keras.models import load_model
             _model = load_model(MODEL_PATH)
             _model_trained = True
             print(f"Loaded model from {MODEL_PATH}")
             return _model
         except Exception as e:
-            print(f"Warning: Could not load model from {MODEL_PATH}: {e}")
+            print(f"Warning: Could not load TF model from {MODEL_PATH}: {e}")
     
     # If no saved model, train one
     print("Training model from UCI Heart Disease dataset...")
@@ -135,19 +137,35 @@ def predict(input_dict):
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TF logging
     
     try:
-        model = load_or_train_model()
-        
         # Build feature vector in correct order
         row = [input_dict.get(fname, 0) for fname in FEATURE_NAMES]
-        
-        # Predict
-        try:
-            proba = float(model.predict(np.array([row]), verbose=0)[0][0])
-        except Exception as e:
-            print(f"Prediction error: {e}")
-            traceback.print_exc()
-            proba = 0.5
-        
+
+        # Prefer ONNX runtime if model artifact exists (so TF is not required on deployment)
+        if os.path.exists(ONNX_PATH):
+            try:
+                global _onnx_session
+                if _onnx_session is None:
+                    import onnxruntime as ort
+                    _onnx_session = ort.InferenceSession(ONNX_PATH, providers=['CPUExecutionProvider'])
+                input_name = _onnx_session.get_inputs()[0].name
+                arr = np.array([row], dtype=np.float32)
+                outputs = _onnx_session.run(None, {input_name: arr})
+                # outputs[0] is expected shape (1,1)
+                proba = float(outputs[0][0][0]) if hasattr(outputs[0], '__getitem__') else float(outputs[0])
+            except Exception as e:
+                print(f"ONNX prediction error: {e}")
+                traceback.print_exc()
+                proba = 0.5
+        else:
+            # Fallback to TensorFlow/Keras model (if available locally)
+            model = load_or_train_model()
+            try:
+                proba = float(model.predict(np.array([row]), verbose=0)[0][0])
+            except Exception as e:
+                print(f"TF prediction error: {e}")
+                traceback.print_exc()
+                proba = 0.5
+
         pred = 1 if proba >= 0.5 else 0
         return float(proba), int(pred)
     except Exception as e:

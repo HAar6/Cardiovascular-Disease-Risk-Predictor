@@ -1,9 +1,9 @@
-# Core ML/Data
-tensorflow>=2.9.0,<2.12
-keras>=2.9.0
+# Core ML/Data (TensorFlow removed for Streamlit Cloud; using ONNX runtime)
 numpy>=1.19.5,<1.24
 scikit-learn>=1.0.0,<2.0
 pandas>=1.1.0,<2.0
+onnxruntime>=1.14.0
+onnx>=1.10.0
 
 # Web Framework
 streamlit>=1.20.0

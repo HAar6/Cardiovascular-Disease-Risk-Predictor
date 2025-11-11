@@ -1,17 +1,8 @@
-# Core ML/Data (TensorFlow removed for Streamlit Cloud; using ONNX runtime)
-numpy>=1.19.5,<1.24
-scikit-learn>=1.0.0,<2.0
-pandas>=1.1.0,<2.0
-onnxruntime>=1.14.0
-onnx>=1.10.0
-
-# Web Framework
-streamlit>=1.20.0
-
-# Utilities
-joblib>=1.0.0
-urllib3<2.0
-
-# These are auto-installed by tf/streamlit but pinned for stability
-protobuf>=3.19.0,<4.0
-setuptools>=41.0.0
+streamlit==1.28.1
+numpy==1.23.5
+pandas==1.5.3
+scikit-learn==1.3.2
+onnxruntime==1.16.3
+onnx==1.15.0
+joblib==1.3.2
+urllib3==1.26.18

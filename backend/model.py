@@ -120,6 +120,12 @@ def train_and_save_model():
     return model
 
 
+def _sigmoid(x):
+    """Numerically stable sigmoid."""
+    import numpy as np
+    return 1.0 / (1.0 + np.exp(-np.clip(x, -500, 500)))
+
+
 def predict(input_dict):
     """
     Predict heart disease risk given patient features.
@@ -140,18 +146,28 @@ def predict(input_dict):
         # Build feature vector in correct order
         row = [input_dict.get(fname, 0) for fname in FEATURE_NAMES]
 
-        # Prefer ONNX runtime if model artifact exists (so TF is not required on deployment)
+        # Prefer ONNX via pure Python if model artifact exists (no onnxruntime needed)
         if os.path.exists(ONNX_PATH):
             try:
                 global _onnx_session
                 if _onnx_session is None:
-                    import onnxruntime as ort
-                    _onnx_session = ort.InferenceSession(ONNX_PATH, providers=['CPUExecutionProvider'])
-                input_name = _onnx_session.get_inputs()[0].name
-                arr = np.array([row], dtype=np.float32)
-                outputs = _onnx_session.run(None, {input_name: arr})
-                # outputs[0] is expected shape (1,1)
-                proba = float(outputs[0][0][0]) if hasattr(outputs[0], '__getitem__') else float(outputs[0])
+                    try:
+                        # Try onnxruntime first if available (local dev)
+                        import onnxruntime as ort
+                        _onnx_session = ort.InferenceSession(ONNX_PATH, providers=['CPUExecutionProvider'])
+                    except ImportError:
+                        # Cloud fallback: use pure Python ONNX loader
+                        _onnx_session = _load_onnx_pure_python(ONNX_PATH)
+                
+                if hasattr(_onnx_session, 'run'):
+                    # onnxruntime path
+                    input_name = _onnx_session.get_inputs()[0].name
+                    arr = np.array([row], dtype=np.float32)
+                    outputs = _onnx_session.run(None, {input_name: arr})
+                    proba = float(outputs[0][0][0]) if hasattr(outputs[0], '__getitem__') else float(outputs[0])
+                else:
+                    # Pure Python ONNX path (Cloud)
+                    proba = float(_onnx_session(np.array([row], dtype=np.float32))[0][0])
             except Exception as e:
                 print(f"ONNX prediction error: {e}")
                 traceback.print_exc()
@@ -174,3 +190,45 @@ def predict(input_dict):
         traceback.print_exc()
         # Return neutral prediction on error
         return 0.5, 0
+
+
+def _load_onnx_pure_python(onnx_path):
+    """
+    Load and execute ONNX model using pure Python (no onnxruntime).
+    Returns a callable that takes input array and returns output.
+    """
+    import numpy as np
+    try:
+        import onnx
+        from onnx import numpy_helper
+        
+        model = onnx.load(onnx_path)
+        graph = model.graph
+        
+        # Extract initializers (weights and biases)
+        initializers = {init.name: numpy_helper.to_array(init) for init in graph.initializer}
+        
+        # Simple forward pass for our specific model architecture: 13->8->4->1 sigmoid
+        def forward(x):
+            # Reshape input
+            x = np.array(x, dtype=np.float32).reshape(1, 13)
+            
+            # Find MatMul and Add nodes for each layer
+            for node in graph.node:
+                if node.op_type == 'MatMul':
+                    w = initializers[node.input[1]]
+                    x = np.matmul(x, w)
+                elif node.op_type == 'Add':
+                    b = initializers[node.input[1]]
+                    x = x + b
+                elif node.op_type == 'Relu':
+                    x = np.maximum(x, 0)
+                elif node.op_type == 'Sigmoid':
+                    x = _sigmoid(x)
+            
+            return x
+        
+        return forward
+    except Exception as e:
+        print(f"Failed to load ONNX with pure Python: {e}")
+        raise

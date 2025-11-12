@@ -1,7 +1,48 @@
+import os
 import streamlit as st
 from backend import model as model_module
 import datetime
 import io
+
+
+# Startup ONNX health-check: try to load the ONNX model once at app start and
+# display a friendly error if loading fails. Uses `onnxruntime` when available
+# otherwise falls back to the pure-Python loader in `backend.model`.
+@st.cache_resource
+def _load_onnx_health():
+    try:
+        onnx_path = getattr(model_module, 'ONNX_PATH', None)
+        if not onnx_path or not os.path.exists(onnx_path):
+            return (False, f"ONNX model not found at {onnx_path}. Ensure `backend/binary_model.onnx` is present in the repo.")
+
+        # Prefer onnxruntime if it's installed (local dev). If not, use the
+        # pure-Python loader implemented in `backend.model`.
+        try:
+            import onnxruntime as ort
+            sess = ort.InferenceSession(onnx_path, providers=['CPUExecutionProvider'])
+            # Basic smoke run with zeros to ensure model executes
+            import numpy as _np
+            inp_name = sess.get_inputs()[0].name
+            sess.run(None, {inp_name: _np.zeros((1, 13), dtype=_np.float32)})
+            return (True, 'onnxruntime')
+        except Exception:
+            # Fall back to pure-Python loader from backend.model
+            try:
+                loader = getattr(model_module, '_load_onnx_pure_python', None)
+                if loader is None:
+                    return (False, 'No fallback ONNX loader available in backend.model')
+                f = loader(onnx_path)
+                # Run a smoke pass
+                import numpy as _np
+                f(_np.zeros((1, 13), dtype=_np.float32))
+                return (True, 'pure-python')
+            except Exception as e:
+                return (False, f'Failed to load ONNX model with pure-Python loader: {e}')
+
+    except Exception as e:
+        return (False, str(e))
+
+
 
 st.set_page_config(page_title="Heart Disease Risk Predictor", layout="wide")
 
